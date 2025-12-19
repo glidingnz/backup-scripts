@@ -1,5 +1,5 @@
-# Wordpress backup scripts
-GNZ owns several Wordpress sites, and these scripts are used to back each of them up.
+# Backup scripts
+GNZ owns several sites, and these scripts are used to back each of them up.
 
 
 ## Installation
