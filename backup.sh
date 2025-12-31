@@ -29,7 +29,7 @@ echo "Dumping DB"
 mysqldump --defaults-extra-file="$SCRIPT_DIR/my.cnf" --single-transaction "$MYSQL_DB" | gzip > "$BACKUP_DEST/$DB_DUMP_FILE_NAME"
 
 echo "Creating a snapshot of $BACKUP_SOURCE"
-tar czf "$BACKUP_DEST/$TAR_FILE_NAME" "$BACKUP_SOURCE"
+tar --exclude='.git' -czf $BACKUP_DEST/$TAR_FILE_NAME" "$BACKUP_SOURCE"
 
 echo "Uploading DB dump to Backblaze B2"
 b2 file upload "$BUCKET_NAME" "$BACKUP_DEST/$DB_DUMP_FILE_NAME" "$DB_DUMP_FILE_NAME"
