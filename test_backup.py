@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import backup
+import pytest
 from backup import RemoteFile, RetentionPolicy, group_by_stem, run_backup, stems_to_delete
 
 
@@ -49,6 +50,16 @@ DEFAULT_POLICY = RetentionPolicy()
 
 def test_stems_to_delete_returns_empty_for_no_backups() -> None:
     assert stems_to_delete({}, now=datetime.now(tz=timezone.utc), policy=DEFAULT_POLICY) == set()
+
+
+def test_ensure_readable_reports_permission_issue(tmp_path: Path, monkeypatch) -> None:
+    config_file = tmp_path / ".env"
+    config_file.touch()
+    monkeypatch.setattr(backup.os, "access", lambda path, mode: False)
+    monkeypatch.setattr(backup.getpass, "getuser", lambda: "forge")
+
+    with pytest.raises(SystemExit, match=r"not readable by forge"):
+        backup.ensure_readable(config_file)
 
 
 def test_stems_to_delete_keeps_all_backups_inside_keep_all_window() -> None:
@@ -168,5 +179,7 @@ def test_run_backup_dry_run_does_not_delete_remote_files(tmp_path: Path, monkeyp
         dry_run=True,
     )
 
+    assert b2.uploaded == []
     assert b2.deleted == []
     assert b2.files == existing
+    assert not (tmp_path / "backups").exists()

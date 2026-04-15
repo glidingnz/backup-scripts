@@ -1,2 +1,4 @@
 .env
 my.cnf
+.venv
+__pycache__/

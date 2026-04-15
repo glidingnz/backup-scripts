@@ -5,6 +5,8 @@ then enforces a tiered retention policy on existing backups."""
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -143,6 +145,18 @@ def parse_policy(env: dict[str, str]) -> RetentionPolicy:
     )
 
 
+def ensure_readable(path: Path) -> None:
+    if not path.exists():
+        raise SystemExit(f'Error: {path} not found')
+    if not os.access(path, os.R_OK):
+        user = getpass.getuser()
+        raise SystemExit(
+            f'Error: {path} is not readable by {user}. '
+            f'Fix ownership/permissions and rerun without sudo, for example: '
+            f'sudo chown {user}:{user} {path} && chmod 600 {path}'
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pure retention logic (no I/O)
 # ---------------------------------------------------------------------------
@@ -220,9 +234,18 @@ def run_backup(
     files_name = f'{stem}-files.tar.gz'
 
     backup_dest = Path(env['BACKUP_DEST'])
-    backup_dest.mkdir(parents=True, exist_ok=True)
     db_path = backup_dest / db_name
     files_path = backup_dest / files_name
+
+    if dry_run:
+        print(f'[dry-run] Would dump DB ({env["MYSQL_DB"]}) to {db_path}')
+        print(f'[dry-run] Would archive files from {env["BACKUP_SOURCE"]} to {files_path}')
+        print(f'[dry-run] Would upload {db_name}')
+        print(f'[dry-run] Would upload {files_name}')
+        prune_backups(b2=b2, policy=parse_policy(env), dry_run=True)
+        return
+
+    backup_dest.mkdir(parents=True, exist_ok=True)
 
     try:
         print(f'Dumping DB ({env["MYSQL_DB"]})')
@@ -275,7 +298,7 @@ def prune_backups(b2: B2Adapter, policy: RetentionPolicy, dry_run: bool = False)
 def main() -> None:
     parser = argparse.ArgumentParser(description='Backup and prune B2 backups')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Run backup normally but skip deleting old backups')
+                        help='Preview backup and pruning actions without creating, uploading, or deleting files')
     parser.add_argument('--prune-only', action='store_true',
                         help='Skip backup creation, only run retention pruning')
     args = parser.parse_args()
@@ -284,10 +307,9 @@ def main() -> None:
     env_path = script_dir / '.env'
     my_cnf_path = script_dir / 'my.cnf'
 
-    if not env_path.exists():
-        raise SystemExit(f'Error: {env_path} not found')
-    if not args.prune_only and not my_cnf_path.exists():
-        raise SystemExit(f'Error: {my_cnf_path} not found')
+    ensure_readable(env_path)
+    if not args.prune_only:
+        ensure_readable(my_cnf_path)
 
     env = load_env(env_path)
     b2 = B2SdkAdapter(
