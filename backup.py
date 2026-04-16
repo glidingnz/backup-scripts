@@ -215,22 +215,26 @@ def ensure_readable(path: Path) -> None:
 # Pure retention logic (no I/O)
 # ---------------------------------------------------------------------------
 
-def stems_to_delete(
+def evaluate_retention(
     stems: dict[str, list[RemoteFile]],
     now: datetime,
     policy: RetentionPolicy,
-) -> set[str]:
-    """Return the set of stems that should be deleted according to the policy.
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Evaluate retention policy and return a plan of what to keep and what to delete.
 
-    Stems are sorted newest-first so the first backup seen in each period
-    bucket is the most recent one — it gets kept, all older ones in the same
-    bucket are deleted.
+    Matches the strategy used by Spatie's laravel-backup. Rules are evaluated
+    independently, so a single backup can satisfy multiple periods (e.g., a
+    backup on the last Sunday of a year could be the daily, weekly, monthly,
+    and yearly backup simultaneously).
+
+    Returns:
+        A tuple of (keep_dict, delete_dict), where each is a mapping of stem -> reasons.
     """
     keep_all_cutoff = now - timedelta(days=policy.keep_all_days)
-    daily_cutoff = keep_all_cutoff - timedelta(days=policy.daily_days)
-    weekly_cutoff = daily_cutoff - timedelta(weeks=policy.weekly_weeks)
-    monthly_cutoff = weekly_cutoff - timedelta(days=policy.monthly_months * 30)
-    yearly_cutoff = monthly_cutoff - timedelta(days=policy.yearly_years * 365)
+    daily_cutoff = now - timedelta(days=policy.daily_days)
+    weekly_cutoff = now - timedelta(weeks=policy.weekly_weeks)
+    monthly_cutoff = now - timedelta(days=policy.monthly_months * 30)
+    yearly_cutoff = now - timedelta(days=policy.yearly_years * 365)
 
     sorted_stems = sorted(stems, key=parse_stem_time, reverse=True)
 
@@ -238,38 +242,69 @@ def stems_to_delete(
     seen_weeks: set = set()
     seen_months: set = set()
     seen_years: set = set()
-    keep: set[str] = set()
+
+    keep: dict[str, str] = {}
+    to_delete: dict[str, str] = {}
+
+    keep_all_count = 0
+    daily_count = 0
+    weekly_count = 0
+    monthly_count = 0
+    yearly_count = 0
 
     for stem in sorted_stems:
         t = parse_stem_time(stem)
+        day_key = t.date()
+        week_key = t.isocalendar()[:2]
+        month_key = (t.year, t.month)
+        year_key = t.year
+
+        reasons = []
+
+        # 1. Keep All
         if t >= keep_all_cutoff:
-            keep.add(stem)
-        elif t >= daily_cutoff:
-            key = t.date()
-            if key not in seen_days:
-                seen_days.add(key)
-                keep.add(stem)
-        elif t >= weekly_cutoff:
-            key = t.isocalendar()[:2]
-            if key not in seen_weeks:
-                seen_weeks.add(key)
-                keep.add(stem)
-        elif t >= monthly_cutoff:
-            key = (t.year, t.month)
-            if key not in seen_months:
-                seen_months.add(key)
-                keep.add(stem)
-        elif t >= yearly_cutoff:
-            key = t.year
-            if key not in seen_years:
-                seen_years.add(key)
-                keep.add(stem)
-        # else: older than all periods — will be deleted
+            keep_all_count += 1
+            reasons.append(f"Keep-all period #{keep_all_count}")
+
+        # 2. Daily (latest per day)
+        if t >= daily_cutoff:
+            if day_key not in seen_days:
+                seen_days.add(day_key)
+                daily_count += 1
+                reasons.append(f"Daily #{daily_count}")
+
+        # 3. Weekly (latest per week)
+        if t >= weekly_cutoff:
+            if week_key not in seen_weeks:
+                seen_weeks.add(week_key)
+                weekly_count += 1
+                reasons.append(f"Weekly #{weekly_count}")
+
+        # 4. Monthly (latest per month)
+        if t >= monthly_cutoff:
+            if month_key not in seen_months:
+                seen_months.add(month_key)
+                monthly_count += 1
+                reasons.append(f"Monthly #{monthly_count}")
+
+        # 5. Yearly (latest per year)
+        if t >= yearly_cutoff:
+            if year_key not in seen_years:
+                seen_years.add(year_key)
+                yearly_count += 1
+                reasons.append(f"Yearly #{yearly_count}")
+
+        if reasons:
+            keep[stem] = ", ".join(reasons)
+        else:
+            to_delete[stem] = "To be deleted"
 
     if sorted_stems and not keep:
-        keep.add(sorted_stems[0])
+        stem = sorted_stems[0]
+        keep[stem] = "Safety: keeping only existing backup"
+        to_delete.pop(stem, None)
 
-    return set(stems.keys()) - keep
+    return keep, to_delete
 
 
 # ---------------------------------------------------------------------------
@@ -330,19 +365,26 @@ def prune_backups(b2: B2Adapter, policy: RetentionPolicy, dry_run: bool = False)
     remote_files = b2.list_files()
     stems = group_by_stem(remote_files)
     now = datetime.now(tz=timezone.utc)
-    to_delete = stems_to_delete(stems, now, policy)
+    keep_plan, delete_plan = evaluate_retention(stems, now, policy)
 
-    kept = len(stems) - len(to_delete)
-    print(f'Retention: {kept} set(s) kept, {len(to_delete)} set(s) to prune')
+    print('\nRetention Plan:')
+    for stem in sorted(stems, key=parse_stem_time, reverse=True):
+        if stem in keep_plan:
+            print(f"  KEEP   {stem} ({keep_plan[stem]})")
+        else:
+            print(f"  DELETE {stem} ({delete_plan[stem]})")
+    print()
 
-    if not to_delete:
+    print(f'Retention summary: {len(keep_plan)} set(s) kept, {len(delete_plan)} set(s) to prune')
+
+    if not delete_plan:
         return
 
-    total_files = sum(len(stems[s]) for s in to_delete)
+    total_files = sum(len(stems[s]) for s in delete_plan)
     prefix = '[dry-run] ' if dry_run else ''
-    print(f'{prefix}Deleting {len(to_delete)} backup set(s) ({total_files} file(s))')
+    print(f'{prefix}Executing deletion of {len(delete_plan)} backup set(s) ({total_files} file(s))')
 
-    for stem in sorted(to_delete):
+    for stem in sorted(delete_plan):
         for f in stems[stem]:
             print(f'  {prefix}{f.name}')
             if not dry_run:

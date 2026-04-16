@@ -2,6 +2,30 @@
 GNZ owns several sites, and these scripts are used to back each of them up.
 
 
+## Retention Policy Strategy
+
+This script follows the tiered retention strategy used by [spatie/laravel-backup](https://github.com/spatie/laravel-backup). 
+
+### How it works
+
+The policy evaluates each backup independently across several calendar-based periods. A single backup can fulfill multiple roles (e.g., the newest backup in a week is often also the newest backup for that specific day).
+
+1.  **Keep-all**: All backups within the configured `RETENTION_KEEP_ALL_DAYS` window are kept.
+2.  **Daily**: For each day in the `RETENTION_DAILY_DAYS` window, only the *newest* backup of that day is kept.
+3.  **Weekly**: For each ISO week in the `RETENTION_WEEKLY_WEEKS` window, only the *newest* backup of that week is kept. 
+    *   *Note*: In a standard daily backup routine, this naturally keeps the **Sunday** backup for each week.
+4.  **Monthly**: For each month in the `RETENTION_MONTHLY_MONTHS` window, only the *newest* backup of that month is kept.
+    *   *Note*: This naturally keeps the **last day of the month**.
+5.  **Yearly**: For each year in the `RETENTION_YEARLY_YEARS` window, only the *newest* backup of that year is kept.
+
+### Output Formatting
+
+When running, the script outputs a **Retention Plan** that labels each backup with all the rules it satisfies. For example:
+- `KEEP   2026-04-15T12-00-00Z (Keep-all period #1, Daily #1, Weekly #1, Monthly #1, Yearly #1)`
+- `DELETE 2026-03-30T12-00-00Z (To be deleted)`
+
+This transparency ensures you know exactly why each backup is being retained or pruned.
+
 ## Installation
 1. Setup new Bucket in Backblaze B2
 2. Create a new application key restricted to that bucket with at least `listFiles`, `writeFiles`, and `deleteFiles`
