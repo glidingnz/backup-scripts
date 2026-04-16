@@ -4,7 +4,7 @@ GNZ owns several sites, and these scripts are used to back each of them up.
 
 ## Installation
 1. Setup new Bucket in Backblaze B2
-2. Create new application key for that bucket, write only
+2. Create a new application key restricted to that bucket with at least `listFiles`, `writeFiles`, and `deleteFiles`
 3. Do not enable a bucket lifecycle rule for backup expiry; `backup.py` now manages retention.
 4. Run `./setup.sh` to create `.venv` and install Python dependencies
 5. Setup `my.cnf` from `my.cnf.example`
@@ -27,7 +27,7 @@ Use the bootstrap script instead:
 5. `./.venv/bin/python backup.py --dry-run`
 
 You do not need to activate the virtualenv in your shell or cron job; calling `.venv/bin/python` directly is enough.
-The dry run still reads the remote backup list so it can preview retention pruning, but it does not write or upload anything.
+The dry run still reads the remote backup list so it can preview retention pruning, so the B2 key must still have `listFiles`.
 
 ## Troubleshooting
 
@@ -55,6 +55,18 @@ Do not run `backup.py` with `sudo`. Fix file ownership instead:
 3. `./.venv/bin/python backup.py --dry-run`
 
 If you use a different deploy user, replace `forge:forge` with that user and group.
+
+### Backblaze `unauthorized`
+
+The old write-only key setup is no longer enough. This script needs to upload new backups, list existing backups, and delete expired ones.
+
+Create or update the Backblaze application key so it is restricted to the backup bucket and includes at least:
+
+1. `listFiles`
+2. `writeFiles`
+3. `deleteFiles`
+
+Then update `.env` with the new key ID and application key and rerun `./.venv/bin/python backup.py --dry-run`.
 
 ## Retention policy
 

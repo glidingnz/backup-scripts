@@ -62,6 +62,14 @@ def test_ensure_readable_reports_permission_issue(tmp_path: Path, monkeypatch) -
         backup.ensure_readable(config_file)
 
 
+def test_build_b2_permission_error_for_list_mentions_retention_capabilities() -> None:
+    message = backup.build_b2_permission_error("list", "backup-bucket", "unauthorized")
+
+    assert 'could not list files in bucket "backup-bucket"' in message
+    assert "preview and enforce retention" in message
+    assert "listFiles, writeFiles, and deleteFiles" in message
+
+
 def test_stems_to_delete_keeps_all_backups_inside_keep_all_window() -> None:
     now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
     stems = grouped_stems(

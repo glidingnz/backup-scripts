@@ -19,6 +19,10 @@ from typing import Protocol
 # Data types
 # ---------------------------------------------------------------------------
 
+
+class B2ConfigurationError(RuntimeError):
+    pass
+
 @dataclass
 class RemoteFile:
     name: str
@@ -55,23 +59,44 @@ class SystemAdapter(Protocol):
 
 class B2SdkAdapter:
     def __init__(self, key_id: str, app_key: str, bucket_name: str) -> None:
+        from b2sdk._internal.exception import Unauthorized
         from b2sdk.v2 import B2Api, InMemoryAccountInfo
+
+        self._bucket_name = bucket_name
         self._api = B2Api(InMemoryAccountInfo())
-        self._api.authorize_account("production", key_id, app_key)
-        self._bucket = self._api.get_bucket_by_name(bucket_name)
+        try:
+            self._api.authorize_account("production", key_id, app_key)
+            self._bucket = self._api.get_bucket_by_name(bucket_name)
+        except Unauthorized as exc:
+            raise B2ConfigurationError(build_b2_permission_error("authorize", bucket_name, str(exc))) from exc
 
     def upload(self, local_path: Path, remote_name: str) -> None:
-        self._bucket.upload_local_file(local_file=str(local_path), file_name=remote_name)
+        from b2sdk._internal.exception import Unauthorized
+
+        try:
+            self._bucket.upload_local_file(local_file=str(local_path), file_name=remote_name)
+        except Unauthorized as exc:
+            raise B2ConfigurationError(build_b2_permission_error("upload", self._bucket_name, str(exc))) from exc
 
     def list_files(self) -> list[RemoteFile]:
+        from b2sdk._internal.exception import Unauthorized
+
         files = []
-        for fv, folder in self._bucket.ls(latest_only=False, recursive=True):
-            if folder is None:
-                files.append(RemoteFile(name=fv.file_name, file_id=fv.id_))
+        try:
+            for fv, folder in self._bucket.ls(latest_only=False, recursive=True):
+                if folder is None:
+                    files.append(RemoteFile(name=fv.file_name, file_id=fv.id_))
+        except Unauthorized as exc:
+            raise B2ConfigurationError(build_b2_permission_error("list", self._bucket_name, str(exc))) from exc
         return files
 
     def delete(self, file: RemoteFile) -> None:
-        self._api.delete_file_version(file_id=file.file_id, file_name=file.name)
+        from b2sdk._internal.exception import Unauthorized
+
+        try:
+            self._api.delete_file_version(file_id=file.file_id, file_name=file.name)
+        except Unauthorized as exc:
+            raise B2ConfigurationError(build_b2_permission_error("delete", self._bucket_name, str(exc))) from exc
 
 
 class SubprocessAdapter:
@@ -142,6 +167,35 @@ def parse_policy(env: dict[str, str]) -> RetentionPolicy:
         weekly_weeks=int(env.get('RETENTION_WEEKLY_WEEKS', 8)),
         monthly_months=int(env.get('RETENTION_MONTHLY_MONTHS', 4)),
         yearly_years=int(env.get('RETENTION_YEARLY_YEARS', 2)),
+    )
+
+
+def build_b2_permission_error(action: str, bucket_name: str, details: str) -> str:
+    required_caps = "listFiles, writeFiles, and deleteFiles"
+    if action == "authorize":
+        return (
+            f'Backblaze B2 rejected the configured application key for bucket "{bucket_name}". '
+            f'Use a key scoped to this bucket with at least {required_caps}. '
+            f'Backblaze details: {details}'
+        )
+    if action == "list":
+        return (
+            f'Backblaze B2 could not list files in bucket "{bucket_name}". '
+            f'This script needs list access to preview and enforce retention. '
+            f'Use a key scoped to this bucket with at least {required_caps}. '
+            f'Backblaze details: {details}'
+        )
+    if action == "delete":
+        return (
+            f'Backblaze B2 could not delete files in bucket "{bucket_name}". '
+            f'This script needs delete access to enforce retention. '
+            f'Use a key scoped to this bucket with at least {required_caps}. '
+            f'Backblaze details: {details}'
+        )
+    return (
+        f'Backblaze B2 could not upload to bucket "{bucket_name}". '
+        f'Use a key scoped to this bucket with at least {required_caps}. '
+        f'Backblaze details: {details}'
     )
 
 
@@ -312,19 +366,22 @@ def main() -> None:
         ensure_readable(my_cnf_path)
 
     env = load_env(env_path)
-    b2 = B2SdkAdapter(
-        key_id=env['B2_APPLICATION_KEY_ID'],
-        app_key=env['B2_APPLICATION_KEY'],
-        bucket_name=env['BUCKET_NAME'],
-    )
+    try:
+        b2 = B2SdkAdapter(
+            key_id=env['B2_APPLICATION_KEY_ID'],
+            app_key=env['B2_APPLICATION_KEY'],
+            bucket_name=env['BUCKET_NAME'],
+        )
 
-    print(f'Starting at {datetime.now(tz=timezone.utc).isoformat()}')
+        print(f'Starting at {datetime.now(tz=timezone.utc).isoformat()}')
 
-    if args.prune_only:
-        prune_backups(b2=b2, policy=parse_policy(env), dry_run=args.dry_run)
-    else:
-        run_backup(b2=b2, system=SubprocessAdapter(), env=env,
-                   script_dir=script_dir, dry_run=args.dry_run)
+        if args.prune_only:
+            prune_backups(b2=b2, policy=parse_policy(env), dry_run=args.dry_run)
+        else:
+            run_backup(b2=b2, system=SubprocessAdapter(), env=env,
+                       script_dir=script_dir, dry_run=args.dry_run)
+    except B2ConfigurationError as exc:
+        raise SystemExit(f'Error: {exc}') from exc
 
     print(f'Done at {datetime.now(tz=timezone.utc).isoformat()}')
 
