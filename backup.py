@@ -32,7 +32,7 @@ class RemoteFile:
 @dataclass
 class RetentionPolicy:
     keep_all_days: int = 7
-    daily_days: int = 7
+    daily_days: int = 16
     weekly_weeks: int = 8
     monthly_months: int = 4
     yearly_years: int = 2
@@ -163,7 +163,7 @@ def load_env(env_path: Path) -> dict[str, str]:
 def parse_policy(env: dict[str, str]) -> RetentionPolicy:
     return RetentionPolicy(
         keep_all_days=int(env.get('RETENTION_KEEP_ALL_DAYS', 7)),
-        daily_days=int(env.get('RETENTION_DAILY_DAYS', 7)),
+        daily_days=int(env.get('RETENTION_DAILY_DAYS', 16)),
         weekly_weeks=int(env.get('RETENTION_WEEKLY_WEEKS', 8)),
         monthly_months=int(env.get('RETENTION_MONTHLY_MONTHS', 4)),
         yearly_years=int(env.get('RETENTION_YEARLY_YEARS', 2)),

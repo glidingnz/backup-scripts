@@ -96,11 +96,13 @@ Then update `.env` with the new key ID and application key and rerun `./.venv/bi
 
 By default, the script keeps:
 
-1. All backups for 7 days
-2. One backup per day for the next 7 days
-3. One backup per week for the next 8 weeks
-4. One backup per month for the next 4 months
-5. One backup per year for the next 2 years
+1. All backups from the last 7 days
+2. One backup per day from the last 16 days
+3. One backup per week from the last 8 weeks
+4. One backup per month from the last 4 months
+5. One backup per year from the last 2 years
+
+These windows overlap (all measured from now), so a recent backup can satisfy multiple rules simultaneously.
 
 The script always keeps at least one backup set, even if every existing backup is older than the configured windows.
 

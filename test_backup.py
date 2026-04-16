@@ -89,10 +89,11 @@ def test_evaluate_retention_keeps_all_backups_inside_keep_all_window() -> None:
 
 def test_evaluate_retention_prunes_older_duplicate_in_daily_window() -> None:
     now = datetime(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+    # Apr 4 is outside keep-all (cutoff Apr 8) but inside daily (cutoff Mar 30)
     stems = grouped_stems("2026-04-04T18-00-00Z", "2026-04-04T06-00-00Z")
 
     keep, delete = evaluate_retention(stems, now=now, policy=DEFAULT_POLICY)
-    assert keep == {"2026-04-04T18-00-00Z": "Weekly #1, Monthly #1, Yearly #1"}
+    assert keep == {"2026-04-04T18-00-00Z": "Daily #1, Weekly #1, Monthly #1, Yearly #1"}
     assert delete == {"2026-04-04T06-00-00Z": "To be deleted"}
 
 
@@ -155,7 +156,7 @@ def test_evaluate_retention_handles_boundary_cutoffs() -> None:
     actual = {**keep, **delete}
     expected = {
         "2026-04-08T12-00-00Z": "Keep-all period #1, Daily #1, Weekly #1, Monthly #1, Yearly #1",
-        "2026-04-01T12-00-00Z": "Weekly #2",
+        "2026-04-01T12-00-00Z": "Daily #2, Weekly #2",
         "2026-02-04T12-00-00Z": "Monthly #2",
         "2026-04-08T11-59-59Z": "To be deleted",
         "2024-02-10T12-00-00Z": "To be deleted"
@@ -185,15 +186,15 @@ def test_evaluate_retention_90_days_of_daily_backups() -> None:
         "2026-04-10T12-00-00Z": "Keep-all period #6, Daily #6",
         "2026-04-09T12-00-00Z": "Keep-all period #7, Daily #7",
         "2026-04-08T12-00-00Z": "Keep-all period #8, Daily #8",
-        "2026-04-07T12-00-00Z": "To be deleted",
-        "2026-04-06T12-00-00Z": "To be deleted",
-        "2026-04-05T12-00-00Z": "Weekly #3",
-        "2026-04-04T12-00-00Z": "To be deleted",
-        "2026-04-03T12-00-00Z": "To be deleted",
-        "2026-04-02T12-00-00Z": "To be deleted",
-        "2026-04-01T12-00-00Z": "To be deleted",
-        "2026-03-31T12-00-00Z": "Monthly #2",
-        "2026-03-30T12-00-00Z": "To be deleted",
+        "2026-04-07T12-00-00Z": "Daily #9",
+        "2026-04-06T12-00-00Z": "Daily #10",
+        "2026-04-05T12-00-00Z": "Daily #11, Weekly #3",
+        "2026-04-04T12-00-00Z": "Daily #12",
+        "2026-04-03T12-00-00Z": "Daily #13",
+        "2026-04-02T12-00-00Z": "Daily #14",
+        "2026-04-01T12-00-00Z": "Daily #15",
+        "2026-03-31T12-00-00Z": "Daily #16, Monthly #2",
+        "2026-03-30T12-00-00Z": "Daily #17",
         "2026-03-29T12-00-00Z": "Weekly #4",
         "2026-03-28T12-00-00Z": "To be deleted",
         "2026-03-27T12-00-00Z": "To be deleted",
