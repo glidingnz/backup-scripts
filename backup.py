@@ -23,6 +23,10 @@ from typing import Protocol
 class B2ConfigurationError(RuntimeError):
     pass
 
+
+class FileRetainedByLockError(RuntimeError):
+    pass
+
 @dataclass
 class RemoteFile:
     name: str
@@ -91,12 +95,17 @@ class B2SdkAdapter:
         return files
 
     def delete(self, file: RemoteFile) -> None:
-        from b2sdk._internal.exception import Unauthorized
+        from b2sdk._internal.exception import AccessDenied, Unauthorized
 
         try:
             self._api.delete_file_version(file_id=file.file_id, file_name=file.name)
         except Unauthorized as exc:
             raise B2ConfigurationError(build_b2_permission_error("delete", self._bucket_name, str(exc))) from exc
+        except AccessDenied as exc:
+            raise FileRetainedByLockError(
+                f'{file.name} is protected by Object Lock and cannot be deleted yet. '
+                f'Backblaze details: {exc}'
+            ) from exc
 
 
 class SubprocessAdapter:
@@ -384,11 +393,19 @@ def prune_backups(b2: B2Adapter, policy: RetentionPolicy, dry_run: bool = False)
     prefix = '[dry-run] ' if dry_run else ''
     print(f'{prefix}Executing deletion of {len(delete_plan)} backup set(s) ({total_files} file(s))')
 
+    locked = 0
     for stem in sorted(delete_plan):
         for f in stems[stem]:
             print(f'  {prefix}{f.name}')
             if not dry_run:
-                b2.delete(f)
+                try:
+                    b2.delete(f)
+                except FileRetainedByLockError:
+                    locked += 1
+                    print(f'    ^ skipped (Object Lock retention still active)')
+
+    if locked:
+        print(f'\n{locked} file(s) skipped due to Object Lock — they will be deleted once retention expires')
 
 
 def main() -> None:

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import backup
 import pytest
-from backup import RemoteFile, RetentionPolicy, group_by_stem, run_backup, evaluate_retention
+from backup import RemoteFile, RetentionPolicy, FileRetainedByLockError, group_by_stem, run_backup, evaluate_retention
 
 
 def remote_files(*stems: str) -> list[RemoteFile]:
@@ -363,3 +363,42 @@ def test_run_backup_dry_run_does_not_delete_remote_files(tmp_path: Path, monkeyp
     assert b2.deleted == []
     assert b2.files == existing
     assert not (tmp_path / "backups").exists()
+
+
+def test_prune_skips_locked_files_and_continues(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(backup, "make_stem", lambda: "2026-04-15T12-00-00Z")
+    existing = remote_files("2018-01-01T10-00-00Z", "2017-01-01T10-00-00Z")
+
+    class LockedB2(FakeB2):
+        def delete(self, file: RemoteFile) -> None:
+            if "2017-01-01" in file.name:
+                raise FileRetainedByLockError(f"{file.name} is locked")
+            super().delete(file)
+
+    b2 = LockedB2(existing=existing)
+    env = {
+        "BACKUP_DEST": str(tmp_path / "backups"),
+        "MYSQL_DB": "app_db",
+        "BACKUP_SOURCE": str(tmp_path / "site"),
+        "RETENTION_KEEP_ALL_DAYS": "7",
+        "RETENTION_DAILY_DAYS": "16",
+        "RETENTION_WEEKLY_WEEKS": "8",
+        "RETENTION_MONTHLY_MONTHS": "4",
+        "RETENTION_YEARLY_YEARS": "2",
+    }
+
+    run_backup(
+        b2=b2,
+        system=FakeSystem(),
+        env=env,
+        script_dir=tmp_path,
+        dry_run=False,
+    )
+
+    # 2017 files were locked — should not be deleted
+    assert all("2017" not in f.name for f in b2.deleted)
+    # 2017 files still in bucket
+    assert any("2017" in f.name for f in b2.files)
+    output = capsys.readouterr().out
+    assert "skipped (Object Lock retention still active)" in output
+    assert "file(s) skipped due to Object Lock" in output

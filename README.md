@@ -106,6 +106,25 @@ These windows overlap (all measured from now), so a recent backup can satisfy mu
 
 The script always keeps at least one backup set, even if every existing backup is older than the configured windows.
 
+## Object Lock (recommended)
+
+Enable B2 Object Lock in **governance mode** with a retention period of 7 days (matching `RETENTION_KEEP_ALL_DAYS`) on the backup bucket. This prevents any file from being deleted until the retention period expires — even if the script has a bug or the API key is compromised.
+
+Because the script already keeps all backups for 7 days, it will never attempt to delete a locked file under normal operation. If it does encounter a locked file (e.g. after lowering `RETENTION_KEEP_ALL_DAYS`), it logs a warning and skips it.
+
+Object Lock must be enabled at bucket creation time — you cannot add it to an existing bucket. To migrate, create a new bucket with Object Lock enabled and update `.env` with the new bucket name.
+
+### API key safety
+
+The script's API key should have only `listFiles`, `writeFiles`, and `deleteFiles`. None of these can bypass Object Lock:
+
+- `deleteFiles` cannot delete a file under active retention
+- `writeBuckets` cannot disable Object Lock once enabled (it is permanent)
+- `writeBucketLifecycleRules` lifecycle rules skip locked files
+- **`bypassGovernance`** is the only capability that can override governance mode — do not grant it to the backup key
+
+If you create the API keys for a specific bucket with read/write, it will not be able to bypass this protection. Read [this article from Backblaze](https://www.backblaze.com/blog/digging-deeper-into-object-lock/) for more details.
+
 ## Migration note
 
 If this bucket previously used a 90-day Backblaze lifecycle rule, remove that rule in the Backblaze console before deploying the Python script. Running both retention systems together will cause unexpected deletions.
